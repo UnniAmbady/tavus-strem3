@@ -1,3 +1,5 @@
+
+#Ver 1.2
 import streamlit as st
 import requests
 import json
@@ -137,3 +139,4 @@ if st.button("Test", type="primary"):
 # ---------------------------------
 st.text_area("Debug log", "\n".join(st.session_state.get("_log", [])), height=180)
 st.caption("Tap [Test] to make the Tavus avatar speak the preset line.")
+
