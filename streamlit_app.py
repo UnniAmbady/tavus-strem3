@@ -1,4 +1,4 @@
-# Ver-3.0 — TAVUS-2 Echo (Daily Interactions) — iPhone-friendly
+# Ver-3.2 — TAVUS-2 Echo (Daily Interactions) — iPhone-friendly
 
 import json
 from datetime import datetime
@@ -24,14 +24,14 @@ st.markdown(
       header,footer{visibility:hidden;height:0}
       .stButton>button{width:100%;padding:0.9rem 1rem;border-radius:12px;font-weight:600}
       textarea{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
-      #frameWrap{width:100%;aspect-ratio:16/9;border-radius:12px;overflow:hidden}
+      #frameWrap{width:100%;height:360px;border-radius:12px;overflow:hidden;background:#0b1020}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # ---------------------------------
-# 🔐 Tavus Config (from secrets)
+# 🔐 Tavus Config (from secrets) (from secrets)
 # ---------------------------------
 TAVUS_API_KEY = st.secrets["tavus"]["api_key"]
 TAVUS_PERSONA_ID = st.secrets["tavus"]["persona_id"]
@@ -137,7 +137,7 @@ if st.session_state.get("conv_url"):
     NONCE = int(st.session_state["_echo_nonce"])  # included in DOM to force refresh
 
     html = f"""
-        <div id=frameWrap></div>
+        <div id="frameWrap"></div>
         <pre id="jslog" style="display:none;white-space:pre-wrap;font-size:12px;background:#0b1020;color:#d6e1ff;padding:8px;border-radius:8px;margin-top:8px;"></pre>
         <div id="nonce" data-v="{NONCE}" style="display:none"></div>
         <script>
@@ -145,6 +145,7 @@ if st.session_state.get("conv_url"):
             const roomUrl = {json.dumps(conv_url)};
             const conversationId = {json.dumps(conv_id)};
             const echoText = {json.dumps(echo_text)};
+            const pendingEcho = true; // when NONCE changes, we plan to send one echo
 
             function log() {{
               const el = document.getElementById('jslog');
@@ -186,16 +187,28 @@ if st.session_state.get("conv_url"):
 
               daily.on('error', (e) => log('daily error:', e && e.errorMsg ? e.errorMsg : 'unknown'));
               daily.on('loaded', () => log('daily loaded'));
-              daily.on('joined-meeting', () => log('joined meeting'));
+              daily.on('joined-meeting', async () => {{
+                log('joined meeting');
+                try {{
+                  // ensure local publishing stays off
+                  await daily.setLocalAudio(false);
+                  await daily.setLocalVideo(false);
+                  log('local tracks disabled');
+                }} catch(_e) {{}}
+                // send queued echo once joined
+                if (pendingEcho) sendEcho();
+              }});
 
-              // Manual function if needed in future (stays within this component)
-              window.__echoTextOnce = sendEcho;
-
-              // If the server injected NONCE just changed, auto-send one echo
+              // Defensive: if already joined (fast joins), try immediately
               try {{
-                const nv = document.getElementById('nonce').getAttribute('data-v');
-                if (nv) {{ sendEcho(); }}
+                const parts = daily.participants && daily.participants();
+                if (parts && Object.keys(parts).length) {{
+                  sendEcho();
+                }}
               }} catch(_e) {{}}
+
+              // keep a manual hook for future
+              window.__echoTextOnce = sendEcho;
             }}).catch(err => {{
               log('Daily JS load failed:', err && err.message ? err.message : err);
             }});
