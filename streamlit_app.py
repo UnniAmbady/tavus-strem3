@@ -174,6 +174,5 @@ if st.button("Test", type="primary"):
 # ---------------------------------
 # 🧾 Debug info
 # ---------------------------------
-st.text_area("Debug log", "
-".join(st.session_state.get("_log", [])), height=180)
+st.text_area("Debug log", "\n".join(st.session_state.get("_log", [])), height=180)
 st.caption("Tap [Test] to make the Tavus avatar speak the preset line. No mic/cam published.")
