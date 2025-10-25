@@ -219,8 +219,7 @@ if st.button("Test", type="primary"):
 # ---------------------------------
 st.text_area(
     label="Debug log",
-    value="
-".join(st.session_state.get("_log", [])),
+    value="\n".join(st.session_state.get("_log", [])),
     height=180,
     key="debug_log",
     disabled=True,
