@@ -1,4 +1,4 @@
-# Ver-3.2 — TAVUS-2 Echo (Daily Interactions) — iPhone-friendly
+# Ver-3.3 — TAVUS-3 Echo (Daily Interactions) — iPhone-friendly
 
 import json
 from datetime import datetime
@@ -40,7 +40,7 @@ TAVUS_REPLICA_ID = st.secrets["tavus"]["replica_id"]
 API_HEADERS = {"x-api-key": TAVUS_API_KEY, "Content-Type": "application/json"}
 
 # ---------------------------------
-# 🪄 Helper Functions
+# 🪄 Helper Utilities
 # ---------------------------------
 def log(msg: str):
     st.session_state.setdefault("_log", [])
