@@ -1,9 +1,10 @@
-#ver-2.5
-import streamlit as st
-import requests
+# Ver-3.0 — TAVUS-2 Echo (Daily Interactions) — iPhone-friendly
+
 import json
 from datetime import datetime
-from html import escape
+
+import requests
+import streamlit as st
 
 # ---------------------------------
 # 📱 PAGE CONFIG (mobile portrait)
@@ -36,6 +37,8 @@ TAVUS_API_KEY = st.secrets["tavus"]["api_key"]
 TAVUS_PERSONA_ID = st.secrets["tavus"]["persona_id"]
 TAVUS_REPLICA_ID = st.secrets["tavus"]["replica_id"]
 
+API_HEADERS = {"x-api-key": TAVUS_API_KEY, "Content-Type": "application/json"}
+
 # ---------------------------------
 # 🪄 Helper Functions
 # ---------------------------------
@@ -46,20 +49,35 @@ def log(msg: str):
 
 
 def create_conversation():
-    """Create a new Tavus conversation and return (id, url)."""
+    """Create a new Tavus conversation and return (id, url). If max concurrent
+    conversations reached, raise a friendly message so user can end current one.
+    """
     url = "https://tavusapi.com/v2/conversations"
     payload = {
         "persona_id": TAVUS_PERSONA_ID,
         "replica_id": TAVUS_REPLICA_ID,
         "conversation_name": f"TAVUS-Echo-{datetime.utcnow().isoformat(timespec='seconds')}"
     }
-    headers = {"x-api-key": TAVUS_API_KEY, "Content-Type": "application/json"}
-    r = requests.post(url, json=payload, headers=headers, timeout=30)
+    r = requests.post(url, json=payload, headers=API_HEADERS, timeout=30)
     if r.status_code >= 400:
-        raise RuntimeError(f"Conversation creation failed: {r.status_code} - {r.text}")
+        try:
+            data = r.json()
+            msg = data.get("message", r.text)
+        except Exception:
+            msg = r.text
+        raise RuntimeError(f"Conversation creation failed: {r.status_code} - {msg}")
     data = r.json()
     log(f"Conversation created ✓ id={data['conversation_id']}")
     return data["conversation_id"], data["conversation_url"]
+
+
+def end_conversation(conversation_id: str):
+    url = f"https://tavusapi.com/v2/conversations/{conversation_id}/end"
+    try:
+        requests.post(url, headers={"x-api-key": TAVUS_API_KEY}, timeout=20)
+        log("Conversation ended ✓")
+    except Exception as e:
+        log(f"End conversation error: {e}")
 
 # ---------------------------------
 # 🎬 Create / Load conversation
@@ -73,15 +91,39 @@ if "conv_id" not in st.session_state:
     except Exception as e:
         st.error(str(e))
 
-# A flip-flop trigger to avoid cross-iframe calls. We pass this value into the
-# single HTML component; when True, JS will send the Echo once and we reset it.
-if "_echo_trigger" not in st.session_state:
-    st.session_state["_echo_trigger"] = False
+# Toolbar (≡) with session control
+cols = st.columns([1,4])
+with cols[0]:
+    with st.expander("≡", expanded=False):
+        if st.button("🔄 New Session", use_container_width=True):
+            if st.session_state.get("conv_id"):
+                end_conversation(st.session_state["conv_id"])
+                st.session_state.pop("conv_id", None)
+                st.session_state.pop("conv_url", None)
+            try:
+                cid, curl = create_conversation()
+                st.session_state["conv_id"] = cid
+                st.session_state["conv_url"] = curl
+                st.success("New session ready.")
+            except Exception as e:
+                st.error(str(e))
+        if st.button("🛑 End Session", use_container_width=True):
+            if st.session_state.get("conv_id"):
+                end_conversation(st.session_state["conv_id"])
+                st.session_state.pop("conv_id", None)
+                st.session_state.pop("conv_url", None)
+                st.warning("Session ended.")
+
+with cols[1]:
+    st.markdown("# 🎙️ TAVUS-2 Echo — Ver 3.0")
+    st.caption("Single-page, portrait-optimized. Press Test to trigger Echo over the live CVI data channel.")
+
+# One-shot trigger value placed in the component markup itself (no `key` arg)
 if "_echo_nonce" not in st.session_state:
     st.session_state["_echo_nonce"] = 0
 
 # ---------------------------------
-# 🎥 Embed Tavus (Daily) + JS Echo (single component, no cross-iframe)
+# 🎥 Embed Tavus (Daily) + JS Echo (single component, no mic/cam publish)
 # ---------------------------------
 if st.session_state.get("conv_url"):
     conv_url = st.session_state["conv_url"]
@@ -92,16 +134,14 @@ if st.session_state.get("conv_url"):
         "TAVUS AVATAR that can participate in any conversation."
     )
 
-    TRIGGER = st.session_state["_echo_trigger"]  # bool -> injected into JS
-    NONCE = st.session_state["_echo_nonce"]      # forces refresh when changed
+    NONCE = int(st.session_state["_echo_nonce"])  # included in DOM to force refresh
 
     html = f"""
-        <div id="frameWrap" style="width:100%;aspect-ratio:16/9;border-radius:12px;overflow:hidden;"></div>
+        <div id=frameWrap></div>
         <pre id="jslog" style="display:none;white-space:pre-wrap;font-size:12px;background:#0b1020;color:#d6e1ff;padding:8px;border-radius:8px;margin-top:8px;"></pre>
+        <div id="nonce" data-v="{NONCE}" style="display:none"></div>
         <script>
           (function() {{
-            const TRIGGER = {json.dumps(bool(TRIGGER)).lower()};
-            const NONCE = {int(NONCE)}; // force rerender usage if needed
             const roomUrl = {json.dumps(conv_url)};
             const conversationId = {json.dumps(conv_id)};
             const echoText = {json.dumps(echo_text)};
@@ -146,21 +186,16 @@ if st.session_state.get("conv_url"):
 
               daily.on('error', (e) => log('daily error:', e && e.errorMsg ? e.errorMsg : 'unknown'));
               daily.on('loaded', () => log('daily loaded'));
-              daily.on('joined-meeting', () => {{
-                log('joined meeting');
-                if (TRIGGER) sendEcho();
-              }});
+              daily.on('joined-meeting', () => log('joined meeting'));
 
-              // If already joined by the time TRIGGER flips on rerender
-              try {{
-                // Prebuilt joins automatically; if TRIGGER and not yet joined, the handler above will fire.
-                if (TRIGGER && daily.participants && Object.keys(daily.participants()).length) {{
-                  sendEcho();
-                }}
-              }} catch(_e) {{}}
-
-              // Also expose a manual function for future use (stays inside same component)
+              // Manual function if needed in future (stays within this component)
               window.__echoTextOnce = sendEcho;
+
+              // If the server injected NONCE just changed, auto-send one echo
+              try {{
+                const nv = document.getElementById('nonce').getAttribute('data-v');
+                if (nv) {{ sendEcho(); }}
+              }} catch(_e) {{}}
             }}).catch(err => {{
               log('Daily JS load failed:', err && err.message ? err.message : err);
             }});
@@ -168,32 +203,26 @@ if st.session_state.get("conv_url"):
         </script>
     """
 
-    # Single component render. Changing NONCE or TRIGGER re-renders this one component only.
-    st.components.v1.html(html, height=520, key=f"tavus_iframe_{NONCE}")
+    # IMPORTANT: Streamlit 1.50's html() does NOT accept `key`; omit it.
+    st.components.v1.html(html, height=520)
 
 # ---------------------------------
-# 🎛️ Test button (toggles trigger and re-renders component)
+# 🎛️ Test button (increments NONCE → component auto-sends once on render)
 # ---------------------------------
 if st.button("Test", type="primary"):
-    st.session_state["_echo_trigger"] = True
-    st.session_state["_echo_nonce"] += 1  # bump to force re-render
+    st.session_state["_echo_nonce"] += 1
     log("Echo trigger set → component will send on next render.")
     st.rerun()
-
-# After rerun, clear trigger so it only fires once per press
-if st.session_state.get("_echo_trigger"):
-    st.session_state["_echo_trigger"] = False
 
 # ---------------------------------
 # 🧾 Debug info
 # ---------------------------------
 st.text_area(
     label="Debug log",
-    value="\n".join(st.session_state.get("_log", [])),
+    value="
+".join(st.session_state.get("_log", [])),
     height=180,
     key="debug_log",
     disabled=True,
 )
 st.caption("Tap [Test] to make the Tavus avatar speak the preset line. No mic/cam published.")
-
-
